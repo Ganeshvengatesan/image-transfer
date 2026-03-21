@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, where } from "firebase/firestore";
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, where, getDocs, deleteDoc, doc } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 
 // Your web app's Firebase configuration
@@ -40,19 +40,33 @@ export const saveImageMetadata = async (imageUrl, name, userId) => {
   }
 };
 
+export const deleteImageMetadata = async (imageId) => {
+  try {
+    await deleteDoc(doc(db, "images", imageId));
+  } catch (error) {
+    console.error("Error deleting document: ", error);
+    throw error;
+  }
+};
+
 export const subscribeToImages = (userId, callback) => {
   if (!userId) return () => { };
 
   // Only fetch images that belong to the current user
   const q = query(
     collection(db, "images"),
-    where("userId", "==", userId),
-    orderBy("timestamp", "desc")
+    where("userId", "==", userId)
   );
 
   return onSnapshot(q,
     (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      // Sort manually by timestamp (descending)
+      data.sort((a, b) => {
+        const timeA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp || 0);
+        const timeB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp || 0);
+        return timeB - timeA;
+      });
       callback(data);
     },
     (error) => {

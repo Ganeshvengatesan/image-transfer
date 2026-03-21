@@ -144,18 +144,12 @@ const App = () => {
 
       {/* Main Content Area */}
       <main className="relative z-10 max-w-7xl mx-auto px-6 py-12 lg:py-20 min-h-[calc(100vh-80px)]">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentView}
-            initial={{ opacity: 0, scale: 0.98, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98, y: -10 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="w-full"
-          >
-            {currentView === "upload" ? <Upload user={user} /> : <Gallery user={user} />}
-          </motion.div>
-        </AnimatePresence>
+        <div className={currentView === "upload" ? "block" : "hidden"}>
+          <Upload user={user} />
+        </div>
+        <div className={currentView === "gallery" ? "block" : "hidden"}>
+          <Gallery user={user} />
+        </div>
       </main>
 
       {/* Sub-footer Stats */}

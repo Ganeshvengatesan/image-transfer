@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Download, ExternalLink, Copy, Search, Grid, List as ListIcon, Loader2, Image as ImageIcon } from "lucide-react";
+import { Download, ExternalLink, Copy, Search, Grid, List as ListIcon, Loader2, Image as ImageIcon, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { subscribeToImages } from "../lib/firebase";
+import { subscribeToImages, deleteImageMetadata } from "../lib/firebase";
 
 
 const Gallery = ({ user }) => {
@@ -42,6 +42,16 @@ const Gallery = ({ user }) => {
         a.click();
         document.body.removeChild(a);
       });
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this image?")) {
+      try {
+        await deleteImageMetadata(id);
+      } catch (error) {
+        console.error("Error deleting image:", error);
+      }
+    }
   };
 
   return (
@@ -177,6 +187,13 @@ const Gallery = ({ user }) => {
                     >
                       <ExternalLink size={18} />
                     </a>
+                    <button
+                      onClick={() => handleDelete(img.id)}
+                      className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl transition-all border border-red-500/10 active:scale-95"
+                      title="Delete Image"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                 </div>
               </motion.div>
