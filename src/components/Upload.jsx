@@ -81,7 +81,7 @@ const Upload = ({ user }) => {
           const data = JSON.parse(xhr.responseText);
           
           try {
-            await saveImageMetadata(data.secure_url, file.name, user.uid);
+            await saveImageMetadata(data.secure_url, file.name, user.uid, data.public_id);
             setUploading(false);
             setSuccess(true);
             setProgress(100);

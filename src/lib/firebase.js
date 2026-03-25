@@ -25,12 +25,13 @@ const provider = new GoogleAuthProvider();
 export const signInWithGoogle = () => signInWithPopup(auth, provider);
 export const logout = () => signOut(auth);
 
-export const saveImageMetadata = async (imageUrl, name, userId) => {
+export const saveImageMetadata = async (imageUrl, name, userId, publicId = null) => {
   try {
     const docRef = await addDoc(collection(db, "images"), {
       url: imageUrl,
       name: name,
       userId: userId, // Keep track of who uploaded it
+      publicId: publicId, // Ensure it gets populated for deletion
       timestamp: serverTimestamp()
     });
     return docRef;

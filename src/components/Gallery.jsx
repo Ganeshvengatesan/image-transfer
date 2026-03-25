@@ -44,10 +44,77 @@ const Gallery = ({ user }) => {
       });
   };
 
-  const handleDelete = async (id) => {
+  const generateSignature = async (publicId, timestamp, apiSecret) => {
+    const str = `public_id=${publicId}&timestamp=${timestamp}${apiSecret}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(str);
+    const hashBuffer = await crypto.subtle.digest("SHA-1", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
+  const deleteFromCloudinary = async (publicId) => {
+    try {
+      const apiKey = import.meta.env.VITE_CLOUDINARY_API_KEY;
+      const apiSecret = import.meta.env.VITE_CLOUDINARY_API_SECRET;
+      const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "dn3jogpb9";
+
+      if (!apiKey || !apiSecret) {
+        console.warn("Cloudinary credentials not set in .env. Skipping Cloudinary deletion.");
+        return true;
+      }
+
+      const timestamp = Math.round(new Date().getTime() / 1000);
+      const signature = await generateSignature(publicId, timestamp, apiSecret);
+
+      const formData = new FormData();
+      formData.append("public_id", publicId);
+      formData.append("api_key", apiKey);
+      formData.append("timestamp", timestamp);
+      formData.append("signature", signature);
+
+      const response = await fetch(
+        `https://api.cloudinary.com/v1_1/${cloudName}/image/destroy`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await response.json();
+      if (data.result !== "ok" && data.result !== "not found") {
+        console.warn("Failed to delete from Cloudinary:", data);
+        return false;
+      }
+      return true;
+    } catch (e) {
+      console.error("Error deleting from Cloudinary:", e);
+      return false;
+    }
+  };
+
+  const handleDelete = async (img) => {
     if (window.confirm("Are you sure you want to delete this image?")) {
       try {
-        await deleteImageMetadata(id);
+        let publicId = img.publicId;
+
+        // Fallback for older images without publicId explicitly saved
+        if (!publicId && img.url) {
+          try {
+            const parts = img.url.split('/upload/');
+            if (parts.length > 1) {
+              publicId = parts[1].replace(/^v\d+\//, '').replace(/\.[^/.]+$/, '');
+            }
+          } catch(err) {
+            // ignore
+          }
+        }
+
+        if (publicId) {
+          await deleteFromCloudinary(publicId);
+        }
+
+        await deleteImageMetadata(img.id);
       } catch (error) {
         console.error("Error deleting image:", error);
       }
@@ -188,7 +255,7 @@ const Gallery = ({ user }) => {
                       <ExternalLink size={18} />
                     </a>
                     <button
-                      onClick={() => handleDelete(img.id)}
+                      onClick={() => handleDelete(img)}
                       className="p-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl transition-all border border-red-500/10 active:scale-95"
                       title="Delete Image"
                     >
