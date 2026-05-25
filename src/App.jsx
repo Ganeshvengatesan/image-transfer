@@ -1,36 +1,406 @@
-import React, { useState, useEffect } from "react";
-import { ToastContainer } from "react-toastify";
+import React, { useState, useEffect, useRef } from "react";
+import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { db, auth, signInWithGoogle, logout } from "./lib/firebase";
+import { db, auth, signInWithGoogle, signInUserAnonymously, logout, getFileByCode, saveFileToUserGallery, updateP2PTransfer, subscribeToP2PTransfer } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import Upload from "./components/Upload";
 import Gallery from "./components/Gallery";
-import { Laptop, Smartphone, LogOut, LogIn, Share2, Sparkles, Send, ShieldCheck } from "lucide-react";
+import { Laptop, Smartphone, LogOut, LogIn, Share2, Sparkles, Send, ShieldCheck, Download, FileText, Film, HelpCircle, Loader2, QrCode } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Html5Qrcode } from "html5-qrcode";
 
 const App = () => {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [activeView, setActiveView] = useState("auto");
+  const [activeView, setActiveView] = useState("auto"); // "auto", "upload", "gallery", "receive"
   const [isMobile, setIsMobile] = useState(false);
 
+  // Retrieval states
+  const [retrievalCode, setRetrievalCode] = useState("");
+  const [retrievalLoading, setRetrievalLoading] = useState(false);
+  const [retrievedFile, setRetrievedFile] = useState(null);
+  const [retrievalError, setRetrievalError] = useState("");
+  const [savedToGallery, setSavedToGallery] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+
+  // WebRTC P2P Receiver states
+  const [p2pReceiverStatus, setP2PReceiverStatus] = useState(null); // null | "connecting" | "transferring" | "completed"
+  const [p2pProgress, setP2PProgress] = useState(0);
+
+  const pcRef = useRef(null);
+  const docListenerRef = useRef(null);
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        try {
+          await signInUserAnonymously();
+        } catch (err) {
+          console.warn("Anonymous sign-in not enabled in console, using guest state:", err);
+          setUser(null);
+          setAuthLoading(false);
+        }
+      } else {
+        setUser(currentUser);
+        setAuthLoading(false);
+      }
     });
 
     const checkMobile = () => setIsMobile(window.innerWidth < 1024);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     
+    // Check URL params for auto-retrieval (e.g. ?code=X8Y9Z2)
+    const params = new URLSearchParams(window.location.search);
+    const urlCode = params.get("code");
+    if (urlCode) {
+      setActiveView("receive");
+      setRetrievalCode(urlCode.toUpperCase());
+      handleRetrieveCode(urlCode.toUpperCase());
+    }
+
     return () => {
       unsubscribe();
       window.removeEventListener("resize", checkMobile);
+      if (pcRef.current) pcRef.current.close();
+      if (docListenerRef.current) docListenerRef.current();
     };
   }, []);
 
-  const currentView = activeView === "auto" ? (isMobile ? "upload" : "gallery") : activeView;
+  const handleScanSuccess = async (decodedText, scannerInstance) => {
+    let code = decodedText.trim();
+    try {
+      if (decodedText.startsWith("http://") || decodedText.startsWith("https://")) {
+        const urlObj = new URL(decodedText);
+        const urlCode = urlObj.searchParams.get("code");
+        if (urlCode) {
+          code = urlCode.toUpperCase();
+        }
+      }
+    } catch (err) {
+      console.warn("QR URL parse error:", err);
+    }
+
+    if (code && code.length === 6) {
+      setRetrievalCode(code);
+      setShowScanner(false);
+      if (scannerInstance && scannerInstance.isScanning) {
+        try {
+          await scannerInstance.stop();
+          scannerInstance.clear();
+        } catch (stopErr) {
+          console.error("Error stopping scanner on success:", stopErr);
+        }
+      }
+      handleRetrieveCode(code);
+    } else {
+      toast.error("Invalid QR code format. Please scan an AeroTransfer QR code.");
+    }
+  };
+
+  useEffect(() => {
+    let html5QrCode = null;
+
+    if (showScanner) {
+      const timer = setTimeout(() => {
+        try {
+          html5QrCode = new Html5Qrcode("qr-reader");
+          html5QrCode.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: (width, height) => {
+                const minEdge = Math.min(width, height);
+                const qrboxSize = Math.floor(minEdge * 0.7);
+                return { width: qrboxSize, height: qrboxSize };
+              }
+            },
+            (decodedText) => {
+              handleScanSuccess(decodedText, html5QrCode);
+            },
+            (errorMessage) => {
+              // Ignore scanning errors to prevent console spam
+            }
+          ).catch(err => {
+            console.error("Camera start error:", err);
+            toast.error("Failed to start camera scanner. Please check permissions.");
+            setShowScanner(false);
+          });
+        } catch (initErr) {
+          console.error("Scanner init error:", initErr);
+          setShowScanner(false);
+        }
+      }, 300);
+
+      return () => {
+        clearTimeout(timer);
+        if (html5QrCode) {
+          if (html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+              html5QrCode.clear();
+            }).catch(stopErr => console.error("Error stopping scanner on cleanup:", stopErr));
+          }
+        }
+      };
+    }
+  }, [showScanner]);
+
+  const isGuest = !user || user.isAnonymous;
+
+  const currentView = activeView === "auto" 
+    ? (!isGuest ? (isMobile ? "upload" : "gallery") : "upload") 
+    : activeView;
+
+  const handleRetrieveCode = async (codeToFetch) => {
+    const code = (codeToFetch || retrievalCode).trim().toUpperCase();
+    if (!code || code.length !== 6) {
+      setRetrievalError("Please enter a valid 6-character code.");
+      return;
+    }
+
+    // Cleanup previous connection
+    if (pcRef.current) {
+      pcRef.current.destroy();
+      pcRef.current = null;
+    }
+
+    setRetrievalLoading(true);
+    setRetrievalError("");
+    setRetrievedFile(null);
+    setSavedToGallery(false);
+    setP2PReceiverStatus(null);
+    setP2PProgress(0);
+
+    // Attempt direct PeerJS connection first (bypasses Firestore rules for guests)
+    startP2PReceiver(code);
+  };
+
+  const lookupFirestoreFile = async (code) => {
+    if (isGuest) {
+      setRetrievalError("Could not connect directly to the sender. Please check that the sender's page is open and matches code: " + code);
+      setRetrievalLoading(false);
+      return;
+    }
+
+    try {
+      const fileData = await getFileByCode(code);
+      if (fileData) {
+        if (fileData.isP2P) {
+          setRetrievalError("P2P sender is offline. Keep the sender's tab open.");
+        } else {
+          setRetrievedFile(fileData);
+        }
+      } else {
+        setRetrievalError("No file found with this code. Check code and try again.");
+      }
+    } catch (err) {
+      console.error(err);
+      if (err.code === "permission-denied" || err.message?.toLowerCase().includes("permission")) {
+        setRetrievalError("Database Permission Denied. To allow guest file retrieval, please go to your online Firebase Console -> Firestore Database -> Rules and change the rule to 'allow read, write: if true;', or deploy your local firestore.rules file.");
+      } else {
+        setRetrievalError("Failed to retrieve file details: " + (err.message || err));
+      }
+    } finally {
+      setRetrievalLoading(false);
+    }
+  };
+
+  // Receiver-side WebRTC logic via PeerJS
+  const startP2PReceiver = async (code) => {
+    setP2PReceiverStatus("connecting");
+    setRetrievalLoading(true);
+
+    try {
+      const peer = new window.Peer({
+        debug: 3,
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
+          ]
+        }
+      });
+      pcRef.current = peer;
+
+      let connected = false;
+      let conn = null;
+
+      // Fallback to Firestore lookup if peer doesn't connect within 15 seconds
+      const timeout = setTimeout(() => {
+        if (!connected) {
+          console.log("P2P connection timed out, fallback to Firestore...");
+          if (conn) conn.close();
+          peer.destroy();
+          pcRef.current = null;
+          lookupFirestoreFile(code);
+        }
+      }, 15000);
+
+      peer.on('open', (id) => {
+        console.log("Receiver peer registered with ID:", id);
+        conn = peer.connect('AEROTRF-' + code);
+
+        conn.on('open', () => {
+          connected = true;
+          clearTimeout(timeout);
+          setP2PReceiverStatus("transferring");
+        });
+
+        let chunks = [];
+        let receivedBytes = 0;
+        let fileMeta = null;
+
+        conn.on('data', (data) => {
+          if (typeof data === "string") {
+            const msg = JSON.parse(data);
+            if (msg.type === "header") {
+              fileMeta = msg;
+              chunks = [];
+              receivedBytes = 0;
+            } else if (msg.type === "eof") {
+              // Reconstruct binary file
+              const fileBlob = new Blob(chunks, { type: fileMeta.mimeType || "application/octet-stream" });
+              const url = URL.createObjectURL(fileBlob);
+
+              setRetrievedFile({
+                name: fileMeta.name,
+                fileType: fileMeta.mimeType?.startsWith("image/") ? "image" : (fileMeta.mimeType?.startsWith("video/") ? "video" : "raw"),
+                isP2P: true,
+                url: url,
+                blob: fileBlob,
+                code: code
+              });
+
+              setP2PReceiverStatus("completed");
+              setRetrievalLoading(false);
+              toast.success("Direct P2P transfer completed!");
+              
+              peer.destroy();
+              pcRef.current = null;
+            }
+          } else {
+            chunks.push(data);
+            receivedBytes += data.byteLength;
+            if (fileMeta) {
+              const percent = Math.round((receivedBytes / fileMeta.size) * 100);
+              setP2PProgress(percent);
+            }
+          }
+        });
+
+        conn.on('error', (err) => {
+          console.error("PeerJS connection error:", err);
+          if (!connected) {
+            clearTimeout(timeout);
+            peer.destroy();
+            pcRef.current = null;
+            lookupFirestoreFile(code);
+          } else {
+            setRetrievalError("Connection lost: " + err.message);
+            setRetrievalLoading(false);
+            setP2PReceiverStatus(null);
+          }
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.error("PeerJS error:", err);
+        if (!connected) {
+          clearTimeout(timeout);
+          peer.destroy();
+          pcRef.current = null;
+          lookupFirestoreFile(code);
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+      lookupFirestoreFile(code);
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    if (!retrievedFile) return;
+
+    // Check if user is authenticated (if not, trigger login)
+    let currentUser = user;
+    if (!currentUser) {
+      try {
+        const result = await signInWithGoogle();
+        if (result.user) {
+          currentUser = result.user;
+          setUser(result.user);
+        } else {
+          return;
+        }
+      } catch (err) {
+        console.error(err);
+        toast.error("Google Sign-In failed.");
+        return;
+      }
+    }
+
+    setRetrievalLoading(true);
+
+    try {
+      if (retrievedFile.isP2P) {
+        // Since it's a P2P transfer, the file is in local browser memory.
+        // We upload it to Cloudinary on behalf of the saving user.
+        toast.info("Uploading direct share to cloud...");
+        const formData = new FormData();
+        formData.append("file", retrievedFile.blob, retrievedFile.name);
+        formData.append("upload_preset", "image_upload");
+
+        const response = await fetch("https://api.cloudinary.com/v1_1/dn3jogpb9/auto/upload", {
+          method: "POST",
+          body: formData
+        });
+
+        if (!response.ok) throw new Error("Cloud upload failed");
+        
+        const data = await response.json();
+        
+        await saveFileToUserGallery({
+          url: data.secure_url,
+          name: retrievedFile.name,
+          publicId: data.public_id,
+          fileType: data.resource_type || retrievedFile.fileType
+        }, currentUser.uid);
+
+      } else {
+        // Standard resolved file metadata, copy directly
+        await saveFileToUserGallery(retrievedFile, currentUser.uid);
+      }
+
+      toast.success("Saved file to your permanent feed!");
+      setSavedToGallery(true);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save file to gallery.");
+    } finally {
+      setRetrievalLoading(false);
+    }
+  };
+
+  const downloadRetrievedFile = (url, name) => {
+    fetch(url, { mode: 'cors' })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const urlBlob = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = urlBlob;
+        a.download = name || "download-file";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      })
+      .catch((err) => {
+        window.open(url, "_blank");
+      });
+  };
 
   if (authLoading) {
     return (
@@ -42,44 +412,8 @@ const App = () => {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-8 overflow-hidden relative">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-          <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-indigo-600/10 blur-[120px] rounded-full"></div>
-          <div className="absolute -bottom-[10%] right-[10%] w-[40%] h-[40%] bg-pink-600/5 blur-[120px] rounded-full"></div>
-        </div>
-
-        <motion.div 
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="w-24 h-24 bg-gradient-to-tr from-indigo-500 to-pink-500 rounded-3xl flex items-center justify-center shadow-2xl rotate-6 mb-4"
-        >
-          <Share2 size={48} className="text-white" />
-        </motion.div>
-
-        <div className="space-y-4 relative z-10">
-          <h1 className="text-5xl font-black tracking-tighter uppercase italic">
-            Aero<span className="text-indigo-400 not-italic">Drop</span>
-          </h1>
-          <p className="text-zinc-400 max-w-sm mx-auto font-medium">
-            Your personal, ultra-secure real-time image transfer cloud. Login with Google to start.
-          </p>
-        </div>
-
-        <button 
-          onClick={signInWithGoogle}
-          className="flex items-center gap-3 px-8 py-4 bg-white text-black rounded-2xl font-bold hover:bg-zinc-200 transition-all active:scale-95 shadow-xl relative z-10 group"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-5" />
-          Join AeroDrop with Google
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-background text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden">
+    <div className="min-h-screen bg-background text-zinc-100 font-sans selection:bg-indigo-500/30 overflow-x-hidden flex flex-col justify-between">
       {/* Background Orbs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div className="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] bg-indigo-600/10 blur-[120px] rounded-full animate-pulse-slow"></div>
@@ -96,19 +430,25 @@ const App = () => {
             <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 transform rotate-3 hover:rotate-0 transition-transform">
               <Share2 size={22} className="text-white" />
             </div>
-            <div className="hidden sm:block">
+            <div>
               <h1 className="text-xl font-black tracking-tighter uppercase italic">
-                Aero<span className="text-indigo-400 not-italic">Drop</span>
+                Aero<span className="text-indigo-400 not-italic">Transfer</span>
               </h1>
               <div className="flex items-center gap-2">
-                <span className="text-[8px] px-1 bg-indigo-500/20 text-indigo-400 rounded-sm font-mono whitespace-nowrap flex items-center gap-1">
+                <span className="text-[8px] px-1.5 py-0.5 bg-indigo-500/20 text-indigo-400 rounded-sm font-mono whitespace-nowrap flex items-center gap-1">
                   <ShieldCheck size={8} /> SECURE FEED
                 </span>
-                <span className="text-[8px] text-zinc-500 uppercase font-black">{user.displayName.split(' ')[0]}</span>
+                {user && !user.isAnonymous && (
+                  <span className="text-[8px] text-zinc-500 uppercase font-black">{user.displayName ? user.displayName.split(' ')[0] : 'User'}</span>
+                )}
+                {user && user.isAnonymous && (
+                  <span className="text-[8px] text-zinc-500 uppercase font-black">GUEST</span>
+                )}
               </div>
             </div>
           </div>
 
+          {/* Navigation Controls */}
           <div className="flex bg-white/5 rounded-2xl p-1 border border-white/10 backdrop-blur-md">
             <button
               onClick={() => setActiveView("upload")}
@@ -117,39 +457,267 @@ const App = () => {
               }`}
             >
               <Smartphone size={16} />
-              <span className="hidden sm:inline">Upload</span>
+              <span className="hidden sm:inline">Send File</span>
             </button>
+
             <button
-              onClick={() => setActiveView("gallery")}
+              onClick={() => setActiveView("receive")}
               className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 text-sm font-bold ${
-                currentView === "gallery" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-zinc-500 hover:text-white"
+                currentView === "receive" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-zinc-500 hover:text-white"
               }`}
             >
-              <Laptop size={16} />
-              <span className="hidden sm:inline">Gallery</span>
+              <Send size={16} />
+              <span className="hidden sm:inline">Receive File</span>
             </button>
+
+            {user && !user.isAnonymous && (
+              <button
+                onClick={() => setActiveView("gallery")}
+                className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 text-sm font-bold ${
+                  currentView === "gallery" ? "bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "text-zinc-500 hover:text-white"
+                }`}
+              >
+                <Laptop size={16} />
+                <span className="hidden sm:inline">My Cloud Feed</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
-            <button 
-              onClick={logout}
-              className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-red-400 hover:bg-red-400/10 transition-all"
-              title="Logout"
-            >
-              <LogOut size={18} />
-            </button>
+            {user && !user.isAnonymous ? (
+              <button 
+                onClick={logout}
+                className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                title="Logout"
+              >
+                <LogOut size={18} />
+              </button>
+            ) : (
+              <button
+                onClick={signInWithGoogle}
+                className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-xl font-bold hover:bg-zinc-200 active:scale-95 transition-all text-xs sm:text-sm"
+              >
+                <LogIn size={14} />
+                <span>Sign In</span>
+              </button>
+            )}
           </div>
         </div>
       </nav>
 
       {/* Main Content Area */}
-      <main className="relative z-10 max-w-7xl mx-auto px-6 py-12 lg:py-20 min-h-[calc(100vh-80px)]">
-        <div className={currentView === "upload" ? "block" : "hidden"}>
-          <Upload user={user} />
-        </div>
-        <div className={currentView === "gallery" ? "block" : "hidden"}>
-          <Gallery user={user} />
-        </div>
+      <main className="relative z-10 max-w-7xl mx-auto w-full px-6 py-12 lg:py-20 flex-grow">
+        
+        {/* Guest Mode Hero Banner if not signed in and on upload/receive view */}
+        {isGuest && currentView !== "receive" && (
+          <div className="text-center max-w-2xl mx-auto mb-12 space-y-4">
+            <h2 className="text-3xl font-black uppercase tracking-tight">
+              Instant File Sharing, <span className="text-indigo-400">Zero Friction</span>
+            </h2>
+            <p className="text-zinc-400 text-sm font-medium leading-relaxed">
+              Upload photos, documents, and videos anonymously without an account. Access them instantly with a unique code or QR. Or <span className="text-indigo-400 cursor-pointer underline hover:text-indigo-300" onClick={signInWithGoogle}>Sign In with Google</span> to save files permanently.
+            </p>
+          </div>
+        )}
+
+        <AnimatePresence mode="wait">
+          {currentView === "upload" && (
+            <motion.div
+              key="upload-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+            >
+              <Upload user={user} />
+            </motion.div>
+          )}
+
+          {currentView === "gallery" && user && !user.isAnonymous && (
+            <motion.div
+              key="gallery-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+            >
+              <Gallery user={user} />
+            </motion.div>
+          )}
+
+          {currentView === "receive" && (
+            <motion.div
+              key="receive-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="max-w-xl mx-auto space-y-8"
+            >
+              <div className="text-center space-y-2">
+                <h2 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-pink-400 bg-clip-text text-transparent">
+                  Retrieve Shared File
+                </h2>
+                <p className="text-zinc-400">Enter a 6-character code to retrieve shared files</p>
+              </div>
+
+              {/* Code Input Card */}
+              <div className="glass p-6 rounded-3xl border border-white/10 space-y-4">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <input
+                    type="text"
+                    placeholder="ENTER 6-DIGIT CODE"
+                    maxLength={6}
+                    value={retrievalCode}
+                    onChange={(e) => setRetrievalCode(e.target.value.toUpperCase())}
+                    className="flex-1 bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl px-6 py-4 text-center font-mono font-black text-2xl tracking-widest focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase placeholder:text-zinc-600 placeholder:text-sm placeholder:font-sans placeholder:tracking-normal"
+                  />
+                  <button
+                    onClick={() => handleRetrieveCode()}
+                    disabled={retrievalLoading}
+                    className="px-8 py-4 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    {retrievalLoading && !p2pReceiverStatus ? (
+                      <Loader2 className="animate-spin" size={20} />
+                    ) : (
+                      "Retrieve"
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex justify-center pt-2">
+                  <button
+                    onClick={() => setShowScanner(!showScanner)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-400 hover:text-indigo-300 rounded-xl text-xs font-bold transition-all active:scale-95"
+                  >
+                    <QrCode size={16} />
+                    <span>{showScanner ? "Close Camera" : "Scan Share QR Code"}</span>
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {showScanner && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden space-y-4 flex flex-col items-center justify-center pt-2"
+                    >
+                      <div 
+                        id="qr-reader" 
+                        className="w-full aspect-square max-w-sm rounded-2xl border border-white/10 overflow-hidden bg-black/40 relative shadow-inner"
+                      />
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black text-center">
+                        Align the AeroTransfer QR code inside the box to scan automatically
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {retrievalError && (
+                  <p className="text-red-400 text-sm font-medium text-center">{retrievalError}</p>
+                )}
+
+                {/* Direct P2P negotiation and stream state */}
+                {p2pReceiverStatus && p2pReceiverStatus !== "completed" && (
+                  <div className="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/25 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
+                      <Loader2 className="animate-spin" size={16} />
+                      <span>
+                        {p2pReceiverStatus === "connecting" && "Establishing direct P2P link..."}
+                        {p2pReceiverStatus === "transferring" && `Streaming data... ${p2pProgress}%`}
+                      </span>
+                    </div>
+                    {p2pReceiverStatus === "transferring" && (
+                      <div className="w-full bg-white/15 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-indigo-500 h-full transition-all duration-200" 
+                          style={{ width: `${p2pProgress}%` }}
+                        />
+                      </div>
+                    )}
+                    <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider text-center">
+                      The sender must keep their AeroTransfer tab open to complete the transfer.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Retrieved File Display Card */}
+              <AnimatePresence>
+                {retrievedFile && (
+                  <motion.div
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    className="glass p-6 rounded-[2rem] border border-white/10 space-y-6"
+                  >
+                    <div className="text-center space-y-2">
+                      <span className="px-3 py-1 bg-indigo-500/20 text-indigo-400 text-xs font-black rounded-full uppercase tracking-wider">
+                        {retrievedFile.isP2P ? "P2P Direct File Resolved" : "File Details"}
+                      </span>
+                      <h3 className="text-xl font-bold text-zinc-100 truncate max-w-full px-2" title={retrievedFile.name}>
+                        {retrievedFile.name}
+                      </h3>
+                      <p className="text-xs text-zinc-500 font-mono">Code: {retrievedFile.code}</p>
+                    </div>
+
+                    {/* File Preview */}
+                    <div className="aspect-video w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center">
+                      {retrievedFile.fileType === "image" ? (
+                        <img src={retrievedFile.url} alt={retrievedFile.name} className="w-full h-full object-contain" />
+                      ) : retrievedFile.fileType === "video" ? (
+                        <video src={retrievedFile.url} className="w-full h-full object-contain" controls />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center space-y-3 p-8">
+                          <FileText size={64} className="text-indigo-400 drop-shadow-md" />
+                          <span className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
+                            Document
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions Panel */}
+                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                      <button
+                        onClick={() => downloadRetrievedFile(retrievedFile.url, retrievedFile.name)}
+                        className="flex-1 py-4 bg-white/10 hover:bg-white/20 border border-white/5 rounded-2xl text-white font-bold transition-all flex items-center justify-center gap-2 active:scale-95"
+                      >
+                        <Download size={20} />
+                        <span>Download File</span>
+                      </button>
+
+                      <button
+                        onClick={handleSaveToGallery}
+                        disabled={savedToGallery || retrievalLoading}
+                        className={`flex-1 py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                          savedToGallery
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-not-allowed"
+                            : "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
+                        }`}
+                      >
+                        {retrievalLoading && p2pReceiverStatus === "completed" ? (
+                          <Loader2 className="animate-spin" size={20} />
+                        ) : savedToGallery ? (
+                          <span>Saved to Gallery</span>
+                        ) : (
+                          <>
+                            <Sparkles size={20} />
+                            <span>{!isGuest ? "Save to my Gallery" : "Sign In & Save to Gallery"}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {isGuest && !savedToGallery && (
+                      <p className="text-[10px] text-zinc-500 text-center font-medium uppercase tracking-wider">
+                        💡 Tip: You can save this file directly to your personal gallery by signing in!
+                      </p>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
 
       {/* Sub-footer Stats */}
@@ -182,7 +750,7 @@ const App = () => {
                 <ShieldCheck size={18} />
               </div>
             </div>
-            <p className="text-[10px] text-zinc-700 font-bold uppercase tracking-[0.3em] mt-8">&copy; 2024 AeroDrop Private Cloud</p>
+            <p className="text-[10px] text-zinc-700 font-bold uppercase tracking-[0.3em] mt-8">&copy; 2024 AeroTransfer Private Cloud</p>
           </div>
         </div>
       </footer>
