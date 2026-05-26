@@ -599,191 +599,218 @@ const App = () => {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
-              className="max-w-xl mx-auto space-y-8"
+              className="max-w-5xl mx-auto"
             >
-              <div className="text-center space-y-2">
-                <h2 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-pink-400 bg-clip-text text-transparent">
-                  Retrieve Shared File
-                </h2>
-                <p className="text-zinc-400">Enter a 6-character code to retrieve shared files</p>
-              </div>
-
-              {/* Code Input Card */}
-              <div className="glass p-6 rounded-3xl border border-white/10 space-y-4">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <input
-                    type="text"
-                    placeholder="ENTER 6-DIGIT CODE"
-                    maxLength={6}
-                    value={retrievalCode}
-                    onChange={(e) => setRetrievalCode(e.target.value.toUpperCase())}
-                    className="flex-1 bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl px-6 py-4 text-center font-mono font-black text-2xl tracking-widest focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase placeholder:text-zinc-600 placeholder:text-sm placeholder:font-sans placeholder:tracking-normal"
-                  />
-                  <button
-                    onClick={() => handleRetrieveCode()}
-                    disabled={retrievalLoading}
-                    className="px-8 py-4 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    {retrievalLoading && !p2pReceiverStatus ? (
-                      <Loader2 className="animate-spin" size={20} />
-                    ) : (
-                      "Retrieve"
-                    )}
-                  </button>
-                </div>
-
-                <div className="flex justify-center pt-2">
-                  <button
-                    onClick={() => setShowScanner(!showScanner)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-400 hover:text-indigo-300 rounded-xl text-xs font-bold transition-all active:scale-95"
-                  >
-                    <QrCode size={16} />
-                    <span>{showScanner ? "Close Camera" : "Scan Share QR Code"}</span>
-                  </button>
-                </div>
-
-                <AnimatePresence>
-                  {showScanner && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden space-y-4 flex flex-col items-center justify-center pt-2"
-                    >
-                      <div 
-                        id="qr-reader" 
-                        className="w-full aspect-square max-w-sm rounded-2xl border border-white/10 overflow-hidden bg-black/40 relative shadow-inner"
-                      />
-                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black text-center">
-                        Align the AeroTransfer QR code inside the box to scan automatically
-                      </p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {retrievalError && (
-                  <p className="text-red-400 text-sm font-medium text-center">{retrievalError}</p>
-                )}
-
-                {/* Direct P2P negotiation and stream state */}
-                {p2pReceiverStatus && p2pReceiverStatus !== "completed" && (
-                  <div className="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/25 flex flex-col items-center gap-3">
-                    <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
-                      <Loader2 className="animate-spin" size={16} />
-                      <span>
-                        {p2pReceiverStatus === "connecting" && "Establishing direct P2P link..."}
-                        {p2pReceiverStatus === "transferring" && `Streaming data... ${p2pProgress}%`}
-                      </span>
-                    </div>
-                    {p2pReceiverStatus === "transferring" && (
-                      <div className="w-full bg-white/15 h-1.5 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-indigo-500 h-full transition-all duration-200" 
-                          style={{ width: `${p2pProgress}%` }}
-                        />
-                      </div>
-                    )}
-                    <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider text-center">
-                      The sender must keep their AeroTransfer tab open to complete the transfer.
-                    </p>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                
+                {/* Left Column (Grid width 5/12): Code Input Card */}
+                <div className="lg:col-span-5 space-y-6 min-w-0">
+                  <div className="text-center lg:text-left space-y-2">
+                    <h2 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-pink-400 bg-clip-text text-transparent">
+                      Retrieve Shared File
+                    </h2>
+                    <p className="text-zinc-400 text-sm">Enter a 6-character code to retrieve shared files</p>
                   </div>
-                )}
-              </div>
 
-              {/* Retrieved File Display Card */}
-              <AnimatePresence>
-                {retrievedFile && (
-                  <motion.div
-                    initial={{ scale: 0.95, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.95, opacity: 0 }}
-                    className="glass p-6 rounded-[2rem] border border-white/10 space-y-6"
-                  >
-                    <div className="text-center space-y-2">
-                      <span className="px-3 py-1 bg-indigo-500/20 text-indigo-400 text-xs font-black rounded-full uppercase tracking-wider">
-                        {retrievedFile.isP2P ? "P2P Direct File Resolved" : "File Details"}
-                      </span>
-                      <h3 className="text-xl font-bold text-zinc-100 truncate max-w-full px-2" title={retrievedFile.name}>
-                        {retrievedFile.name}
-                      </h3>
-                      <p className="text-xs text-zinc-500 font-mono">Code: {retrievedFile.code}</p>
-                    </div>
-
-                    {/* File Preview */}
-                    <div 
-                      className={`aspect-video w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center relative group ${
-                        (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") ? "cursor-zoom-in" : ""
-                      }`}
-                      onClick={() => {
-                        if (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") {
-                          setLightboxFile(retrievedFile);
-                        }
-                      }}
-                    >
-                      {retrievedFile.fileType === "image" ? (
-                        <>
-                          <img src={retrievedFile.url} alt={retrievedFile.name} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                            <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to View Full</span>
-                          </div>
-                        </>
-                      ) : retrievedFile.fileType === "video" ? (
-                        <>
-                          <video src={retrievedFile.url} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-                            <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to Play Full Screen</span>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center space-y-3 p-8">
-                          <FileText size={64} className="text-indigo-400 drop-shadow-md" />
-                          <span className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
-                            Document
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Actions Panel */}
-                    <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <div className="glass p-6 rounded-3xl border border-white/10 space-y-4">
+                    <div className="flex flex-col sm:flex-row lg:flex-col gap-3">
+                      <input
+                        type="text"
+                        placeholder="ENTER 6-DIGIT CODE"
+                        maxLength={6}
+                        value={retrievalCode}
+                        onChange={(e) => setRetrievalCode(e.target.value.toUpperCase())}
+                        className="flex-1 bg-white/5 border border-white/10 focus:border-indigo-500/50 rounded-2xl px-6 py-4 text-center font-mono font-black text-2xl tracking-widest focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all uppercase placeholder:text-zinc-600 placeholder:text-sm placeholder:font-sans placeholder:tracking-normal"
+                      />
                       <button
-                        onClick={() => downloadRetrievedFile(retrievedFile.url, retrievedFile.name)}
-                        className="flex-1 py-4 bg-white/10 hover:bg-white/20 border border-white/5 rounded-2xl text-white font-bold transition-all flex items-center justify-center gap-2 active:scale-95"
+                        onClick={() => handleRetrieveCode()}
+                        disabled={retrievalLoading}
+                        className="px-8 py-4 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-2xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
                       >
-                        <Download size={20} />
-                        <span>Download File</span>
-                      </button>
-
-                      <button
-                        onClick={handleSaveToGallery}
-                        disabled={savedToGallery || retrievalLoading}
-                        className={`flex-1 py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 ${
-                          savedToGallery
-                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-not-allowed"
-                            : "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
-                        }`}
-                      >
-                        {retrievalLoading && p2pReceiverStatus === "completed" ? (
+                        {retrievalLoading && !p2pReceiverStatus ? (
                           <Loader2 className="animate-spin" size={20} />
-                        ) : savedToGallery ? (
-                          <span>Saved to Gallery</span>
                         ) : (
-                          <>
-                            <Sparkles size={20} />
-                            <span>{!isGuest ? "Save to my Gallery" : "Sign In & Save to Gallery"}</span>
-                          </>
+                          "Retrieve"
                         )}
                       </button>
                     </div>
 
-                    {isGuest && !savedToGallery && (
-                      <p className="text-[10px] text-zinc-500 text-center font-medium uppercase tracking-wider">
-                        💡 Tip: You can save this file directly to your personal gallery by signing in!
-                      </p>
+                    <div className="flex justify-center pt-2">
+                      <button
+                        onClick={() => setShowScanner(!showScanner)}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-indigo-400 hover:text-indigo-300 rounded-xl text-xs font-bold transition-all active:scale-95"
+                      >
+                        <QrCode size={16} />
+                        <span>{showScanner ? "Close Camera" : "Scan Share QR Code"}</span>
+                      </button>
+                    </div>
+
+                    <AnimatePresence>
+                      {showScanner && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden space-y-4 flex flex-col items-center justify-center pt-2"
+                        >
+                          <div 
+                            id="qr-reader" 
+                            className="w-full aspect-square max-w-sm rounded-2xl border border-white/10 overflow-hidden bg-black/40 relative shadow-inner"
+                          />
+                          <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-black text-center">
+                            Align the AeroTransfer QR code inside the box to scan automatically
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {retrievalError && (
+                      <p className="text-red-400 text-sm font-medium text-center">{retrievalError}</p>
                     )}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+
+                    {/* Direct P2P negotiation and stream state */}
+                    {p2pReceiverStatus && p2pReceiverStatus !== "completed" && (
+                      <div className="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/25 flex flex-col items-center gap-3">
+                        <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
+                          <Loader2 className="animate-spin" size={16} />
+                          <span>
+                            {p2pReceiverStatus === "connecting" && "Establishing direct P2P link..."}
+                            {p2pReceiverStatus === "transferring" && `Streaming data... ${p2pProgress}%`}
+                          </span>
+                        </div>
+                        {p2pReceiverStatus === "transferring" && (
+                          <div className="w-full bg-white/15 h-1.5 rounded-full overflow-hidden">
+                            <div 
+                              className="bg-indigo-500 h-full transition-all duration-200" 
+                              style={{ width: `${p2pProgress}%` }}
+                            />
+                          </div>
+                        )}
+                        <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider text-center">
+                          The sender must keep their AeroTransfer tab open to complete the transfer.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Column (Grid width 7/12): Retrieved File Display Card or Placeholder */}
+                <div className="lg:col-span-7 w-full min-w-0">
+                  <AnimatePresence mode="wait">
+                    {retrievedFile ? (
+                      <motion.div
+                        key="retrieved-file-display"
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.95, opacity: 0 }}
+                        className="glass p-6 rounded-[2rem] border border-white/10 space-y-6"
+                      >
+                        <div className="text-center space-y-2">
+                          <span className="px-3 py-1 bg-indigo-500/20 text-indigo-400 text-xs font-black rounded-full uppercase tracking-wider">
+                            {retrievedFile.isP2P ? "P2P Direct File Resolved" : "File Details"}
+                          </span>
+                          <h3 className="text-xl font-bold text-zinc-100 truncate max-w-full px-2" title={retrievedFile.name}>
+                            {retrievedFile.name}
+                          </h3>
+                          <p className="text-xs text-zinc-500 font-mono">Code: {retrievedFile.code}</p>
+                        </div>
+
+                        {/* File Preview */}
+                        <div 
+                          className={`aspect-video w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center relative group ${
+                            (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") ? "cursor-zoom-in" : ""
+                          }`}
+                          onClick={() => {
+                            if (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") {
+                              setLightboxFile(retrievedFile);
+                            }
+                          }}
+                        >
+                          {retrievedFile.fileType === "image" ? (
+                            <>
+                              <img src={retrievedFile.url} alt={retrievedFile.name} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to View Full</span>
+                              </div>
+                            </>
+                          ) : retrievedFile.fileType === "video" ? (
+                            <>
+                              <video src={retrievedFile.url} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to Play Full Screen</span>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center space-y-3 p-8">
+                              <FileText size={64} className="text-indigo-400 drop-shadow-md" />
+                              <span className="text-[10px] font-bold font-mono text-zinc-500 uppercase tracking-widest bg-white/5 px-2.5 py-1 rounded-full border border-white/5">
+                                Document
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Actions Panel */}
+                        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                          <button
+                            onClick={() => downloadRetrievedFile(retrievedFile.url, retrievedFile.name)}
+                            className="flex-1 py-4 bg-white/10 hover:bg-white/20 border border-white/5 rounded-2xl text-white font-bold transition-all flex items-center justify-center gap-2 active:scale-95"
+                          >
+                            <Download size={20} />
+                            <span>Download File</span>
+                          </button>
+
+                          <button
+                            onClick={handleSaveToGallery}
+                            disabled={savedToGallery || retrievalLoading}
+                            className={`flex-1 py-4 font-bold rounded-2xl transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                              savedToGallery
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 cursor-not-allowed"
+                                : "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50"
+                            }`}
+                          >
+                            {retrievalLoading && p2pReceiverStatus === "completed" ? (
+                              <Loader2 className="animate-spin" size={20} />
+                            ) : savedToGallery ? (
+                              <span>Saved to Gallery</span>
+                            ) : (
+                              <>
+                                <Sparkles size={20} />
+                                <span>{!isGuest ? "Save to my Gallery" : "Sign In & Save to Gallery"}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {isGuest && !savedToGallery && (
+                          <p className="text-[10px] text-zinc-500 text-center font-medium uppercase tracking-wider">
+                            💡 Tip: You can save this file directly to your personal gallery by signing in!
+                          </p>
+                        )}
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="retrieved-file-placeholder"
+                        initial={{ scale: 0.95, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.95, opacity: 0 }}
+                        className="glass p-8 rounded-[2rem] border-dashed border-2 border-white/15 flex flex-col items-center justify-center text-center space-y-4 min-h-[380px]"
+                      >
+                        <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center text-zinc-500">
+                          <Download size={28} />
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xl font-semibold text-zinc-300">Ready to Receive</p>
+                          <p className="text-zinc-500 text-sm max-w-xs mx-auto">
+                            Enter a 6-digit share code or scan the QR code on the left to resolve and preview the shared file instantly.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
