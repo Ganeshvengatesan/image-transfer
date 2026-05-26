@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Upload as UploadIcon, X, CheckCircle, Loader2, Image as ImageIcon, FileText, Film, QrCode, Copy, Check, ExternalLink, Share2, HelpCircle } from "lucide-react";
+import { Upload as UploadIcon, X, CheckCircle, Loader2, Image as ImageIcon, FileText, Film, QrCode, Copy, Check, ExternalLink, HelpCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { saveFileMetadata, getFileByCode, createP2PTransfer, updateP2PTransfer, subscribeToP2PTransfer } from "../lib/firebase";
 

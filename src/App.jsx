@@ -5,9 +5,33 @@ import { db, auth, signInWithGoogle, signInUserAnonymously, logout, getFileByCod
 import { onAuthStateChanged } from "firebase/auth";
 import Upload from "./components/Upload";
 import Gallery from "./components/Gallery";
-import { Laptop, Smartphone, LogOut, LogIn, Share2, Sparkles, Send, ShieldCheck, Download, FileText, Film, HelpCircle, Loader2, QrCode, X } from "lucide-react";
+import { Laptop, Smartphone, LogOut, LogIn, Sparkles, Send, ShieldCheck, Download, FileText, Film, HelpCircle, Loader2, QrCode, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Html5Qrcode } from "html5-qrcode";
+import logoImg from "./assets/logo.png";
+
+const AeroTransferIcon = ({ size = 22, className = "" }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    {/* Dynamic loop trail representing high-speed transfer */}
+    <path d="M9 18C5.5 18 3 15.5 3 12C3 8.5 5.5 6 9 6" strokeDasharray="2 2" />
+    <path d="M15 6C18.5 6 21 8.5 21 12C21 15.5 18.5 18 15 18" />
+    <path d="M17 16L15 18L17 20" />
+    <path d="M7 8L9 6L7 4" />
+    {/* An elegant paper plane pointing up-right, representing Aero */}
+    <path d="M22 2L11 13" strokeWidth="1.5" />
+    <path d="M22 2L15 22L11 13L2 9L22 2Z" fill="currentColor" strokeWidth="1.5" />
+  </svg>
+);
 
 const App = () => {
   const [user, setUser] = useState(null);
@@ -455,8 +479,18 @@ const App = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }} className="text-indigo-500">
-          <Share2 size={40} />
+        <motion.div 
+          animate={{ 
+            scale: [1, 1.05, 1],
+            opacity: [0.8, 1, 0.8] 
+          }} 
+          transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }} 
+          className="text-indigo-500 flex flex-col items-center gap-4"
+        >
+          <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center shadow-2xl shadow-indigo-500/30 transform rotate-6 border border-white/10">
+            <img src={logoImg} alt="AeroTransfer Logo" className="w-full h-full object-cover" />
+          </div>
+          <span className="text-xs font-black uppercase tracking-[0.25em] text-zinc-500 mt-2">Loading AeroTransfer...</span>
         </motion.div>
       </div>
     );
@@ -477,8 +511,8 @@ const App = () => {
       <nav className="sticky top-0 z-50 backdrop-blur-2xl border-b border-white/5 bg-black/20">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-500/20 transform rotate-3 hover:rotate-0 transition-transform">
-              <Share2 size={22} className="text-white" />
+            <div className="w-10 h-10 rounded-xl overflow-hidden flex items-center justify-center shadow-lg shadow-indigo-500/20 transform rotate-3 hover:rotate-0 transition-transform border border-white/10">
+              <img src={logoImg} alt="AeroTransfer Logo" className="w-full h-full object-cover" />
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tighter uppercase italic">
