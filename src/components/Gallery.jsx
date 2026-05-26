@@ -3,7 +3,7 @@ import { Download, ExternalLink, Copy, Search, Grid, List as ListIcon, Loader2, 
 import { motion, AnimatePresence } from "framer-motion";
 import { subscribeToImages, deleteImageMetadata } from "../lib/firebase";
 
-const Gallery = ({ user }) => {
+const Gallery = ({ user, onViewFile }) => {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -255,7 +255,16 @@ const Gallery = ({ user }) => {
                 exit={{ opacity: 0, scale: 0.8 }}
                 className={`group glass rounded-3xl overflow-hidden shadow-2xl transition-all duration-300 hover:translate-y-[-4px] hover:border-white/20 hover:shadow-indigo-500/10 ${view === "list" ? "flex gap-6 h-48" : ""}`}
               >
-                <div className={`relative overflow-hidden ${view === "list" ? "w-64 h-full flex-shrink-0" : "aspect-square"}`}>
+                <div 
+                  className={`relative overflow-hidden ${view === "list" ? "w-64 h-full flex-shrink-0" : "aspect-square"} ${
+                    (fileItem.fileType === "image" || fileItem.fileType === "video") ? "cursor-zoom-in" : ""
+                  }`}
+                  onClick={() => {
+                    if (onViewFile && (fileItem.fileType === "image" || fileItem.fileType === "video")) {
+                      onViewFile(fileItem);
+                    }
+                  }}
+                >
                   {renderThumbnail(fileItem)}
                   
                   {/* Share code badge */}

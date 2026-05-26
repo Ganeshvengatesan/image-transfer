@@ -26,7 +26,7 @@ export const signInWithGoogle = () => signInWithPopup(auth, provider);
 export const signInUserAnonymously = () => signInAnonymously(auth);
 export const logout = () => signOut(auth);
 
-export const saveFileMetadata = async (fileUrl, name, userId, publicId = null, fileType = "image", code = null) => {
+export const saveFileMetadata = async (fileUrl, name, userId, publicId = null, fileType = "image", code = null, isTemporary = false) => {
   try {
     const docRef = await addDoc(collection(db, "images"), {
       url: fileUrl,
@@ -35,12 +35,64 @@ export const saveFileMetadata = async (fileUrl, name, userId, publicId = null, f
       publicId: publicId, // Ensure it gets populated for deletion
       fileType: fileType, // "image", "video", "raw"
       code: code ? code.toUpperCase() : null, // Unique code if shared anonymously
+      isTemporary: isTemporary,
       timestamp: serverTimestamp()
     });
     return docRef;
   } catch (error) {
     console.error("Error adding document: ", error);
     throw error;
+  }
+};
+
+export const generateCloudinarySignature = async (publicId, timestamp, apiSecret) => {
+  const str = `public_id=${publicId}&timestamp=${timestamp}${apiSecret}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hashBuffer = await crypto.subtle.digest("SHA-1", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+export const deleteFileFromCloudinary = async (publicId, fileType = "image") => {
+  try {
+    const apiKey = import.meta.env.VITE_CLOUDINARY_API_KEY;
+    const apiSecret = import.meta.env.VITE_CLOUDINARY_API_SECRET;
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || "dn3jogpb9";
+
+    if (!apiKey || !apiSecret) {
+      console.warn("Cloudinary credentials not set in .env. Skipping Cloudinary deletion.");
+      return true;
+    }
+
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const signature = await generateCloudinarySignature(publicId, timestamp, apiSecret);
+
+    const formData = new FormData();
+    formData.append("public_id", publicId);
+    formData.append("api_key", apiKey);
+    formData.append("timestamp", timestamp);
+    formData.append("signature", signature);
+
+    const resourceType = fileType === "raw" ? "raw" : (fileType === "video" ? "video" : "image");
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/destroy`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const data = await response.json();
+    if (data.result !== "ok" && data.result !== "not found") {
+      console.warn("Failed to delete from Cloudinary:", data);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Error deleting from Cloudinary:", e);
+    return false;
   }
 };
 

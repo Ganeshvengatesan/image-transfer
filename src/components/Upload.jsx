@@ -288,7 +288,7 @@ const Upload = ({ user }) => {
             const detectedType = data.resource_type || getFileTypeCategory(file);
             
             let generatedCode = null;
-            if (shareOption) {
+            if (shareOption || isGuest) {
               let isUnique = false;
               let attempts = 0;
               while (!isUnique && attempts < 10) {
@@ -303,8 +303,8 @@ const Upload = ({ user }) => {
               if (!generatedCode) generatedCode = generateShareCode();
             }
 
-            const uid = user.uid;
-            await saveFileMetadata(data.secure_url, file.name, uid, data.public_id, detectedType, generatedCode);
+            const uid = user?.uid || "anonymous";
+            await saveFileMetadata(data.secure_url, file.name, uid, data.public_id, detectedType, generatedCode, isGuest);
             
             setUploading(false);
             setSuccess(true);
@@ -341,13 +341,8 @@ const Upload = ({ user }) => {
   };
 
   const handleStartTransfer = () => {
-    if (isGuest) {
-      // Guest mode requires P2P direct share
-      startP2PTransfer();
-    } else {
-      // Logged in users can choose between cloud and code-generation
-      uploadToCloudinary();
-    }
+    // Both guests and logged in users can upload to Cloudinary so they don't have to keep the tab open
+    uploadToCloudinary();
   };
 
   const copyToClipboard = (text, setCopied) => {
@@ -368,12 +363,12 @@ const Upload = ({ user }) => {
     <div className="max-w-xl mx-auto space-y-8 animate-fade-in">
       <div className="text-center space-y-2">
         <h2 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-pink-400 bg-clip-text text-transparent">
-          {!isGuest ? "Cloud File Transfer" : "Instant Direct Send"}
+          {!isGuest ? "Cloud File Transfer" : "Instant Cloud Transfer"}
         </h2>
         <p className="text-zinc-400 text-sm">
           {!isGuest 
             ? "Upload photos, videos, or documents to your permanent feed." 
-            : "Direct P2P share (no cloud uploads). Keeps files in local cache; keep page open to share!"}
+            : "Direct transfer via cloud cache. Sender page can be closed after upload!"}
         </p>
       </div>
 
@@ -481,8 +476,8 @@ const Upload = ({ user }) => {
               <div className="flex items-start gap-3 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-indigo-300 text-xs leading-relaxed">
                 <HelpCircle size={20} className="flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="font-bold mb-1">Direct Peer-to-Peer Transfer (Privacy-first)</p>
-                  <p>Your file is stored securely in your browser cache and streamed directly to the receiver. It is never uploaded to the cloud database or storage. You must keep this webpage open during transfer.</p>
+                  <p className="font-bold mb-1">Cloud Cache Transfer (Convenient & Secure)</p>
+                  <p>Your file is uploaded to secure cloud cache and retrieved with a 6-character code. The file is deleted automatically from the cloud once the receiver downloads it. You do not need to keep this page open!</p>
                 </div>
               </div>
             )}

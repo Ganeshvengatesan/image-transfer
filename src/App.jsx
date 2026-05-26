@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import { db, auth, signInWithGoogle, signInUserAnonymously, logout, getFileByCode, saveFileToUserGallery, updateP2PTransfer, subscribeToP2PTransfer } from "./lib/firebase";
+import { db, auth, signInWithGoogle, signInUserAnonymously, logout, getFileByCode, saveFileToUserGallery, updateP2PTransfer, subscribeToP2PTransfer, deleteImageMetadata, deleteFileFromCloudinary } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import Upload from "./components/Upload";
 import Gallery from "./components/Gallery";
-import { Laptop, Smartphone, LogOut, LogIn, Share2, Sparkles, Send, ShieldCheck, Download, FileText, Film, HelpCircle, Loader2, QrCode } from "lucide-react";
+import { Laptop, Smartphone, LogOut, LogIn, Share2, Sparkles, Send, ShieldCheck, Download, FileText, Film, HelpCircle, Loader2, QrCode, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -26,6 +26,7 @@ const App = () => {
   // WebRTC P2P Receiver states
   const [p2pReceiverStatus, setP2PReceiverStatus] = useState(null); // null | "connecting" | "transferring" | "completed"
   const [p2pProgress, setP2PProgress] = useState(0);
+  const [lightboxFile, setLightboxFile] = useState(null);
 
   const pcRef = useRef(null);
   const docListenerRef = useRef(null);
@@ -151,6 +152,22 @@ const App = () => {
     ? (!isGuest ? (isMobile ? "upload" : "gallery") : "upload") 
     : activeView;
 
+  const cleanupTemporaryFile = async (file) => {
+    if (!file || !file.isTemporary) return;
+    try {
+      // 1. Delete from Firestore
+      if (file.id) {
+        await deleteImageMetadata(file.id);
+      }
+      // 2. Delete from Cloudinary
+      if (file.publicId) {
+        await deleteFileFromCloudinary(file.publicId, file.fileType || "image");
+      }
+    } catch (err) {
+      console.error("Error during temporary file cleanup:", err);
+    }
+  };
+
   const handleRetrieveCode = async (codeToFetch) => {
     const code = (codeToFetch || retrievalCode).trim().toUpperCase();
     if (!code || code.length !== 6) {
@@ -171,17 +188,29 @@ const App = () => {
     setP2PReceiverStatus(null);
     setP2PProgress(0);
 
-    // Attempt direct PeerJS connection first (bypasses Firestore rules for guests)
-    startP2PReceiver(code);
+    try {
+      // 1. Try to find the file metadata in Firestore first
+      const fileData = await getFileByCode(code);
+      if (fileData) {
+        if (fileData.isP2P) {
+          // If P2P direct share, run receiver
+          startP2PReceiver(code);
+        } else {
+          // If cloud file, load immediately
+          setRetrievedFile(fileData);
+          setRetrievalLoading(false);
+        }
+      } else {
+        // 2. Fallback to PeerJS direct search
+        startP2PReceiver(code);
+      }
+    } catch (err) {
+      console.warn("Firestore check failed, using direct search fallback...", err);
+      startP2PReceiver(code);
+    }
   };
 
   const lookupFirestoreFile = async (code) => {
-    if (isGuest) {
-      setRetrievalError("Could not connect directly to the sender. Please check that the sender's page is open and matches code: " + code);
-      setRetrievalLoading(false);
-      return;
-    }
-
     try {
       const fileData = await getFileByCode(code);
       if (fileData) {
@@ -196,7 +225,7 @@ const App = () => {
     } catch (err) {
       console.error(err);
       if (err.code === "permission-denied" || err.message?.toLowerCase().includes("permission")) {
-        setRetrievalError("Database Permission Denied. To allow guest file retrieval, please go to your online Firebase Console -> Firestore Database -> Rules and change the rule to 'allow read, write: if true;', or deploy your local firestore.rules file.");
+        setRetrievalError("Database Permission Denied. To allow file retrieval, please check your Firebase Firestore rules.");
       } else {
         setRetrievalError("Failed to retrieve file details: " + (err.message || err));
       }
@@ -346,12 +375,18 @@ const App = () => {
     setRetrievalLoading(true);
 
     try {
-      if (retrievedFile.isP2P) {
-        // Since it's a P2P transfer, the file is in local browser memory.
-        // We upload it to Cloudinary on behalf of the saving user.
-        toast.info("Uploading direct share to cloud...");
+      if (retrievedFile.isP2P || retrievedFile.isTemporary) {
+        // Since it's a P2P or temporary transfer, we upload the file to Cloudinary
+        // on behalf of the saving user so it exists in their feed permanently.
+        toast.info("Uploading file to cloud...");
+        let blob = retrievedFile.blob;
+        if (!blob) {
+          const res = await fetch(retrievedFile.url);
+          blob = await res.blob();
+        }
+
         const formData = new FormData();
-        formData.append("file", retrievedFile.blob, retrievedFile.name);
+        formData.append("file", blob, retrievedFile.name);
         formData.append("upload_preset", "image_upload");
 
         const response = await fetch("https://api.cloudinary.com/v1_1/dn3jogpb9/auto/upload", {
@@ -377,6 +412,11 @@ const App = () => {
 
       toast.success("Saved file to your permanent feed!");
       setSavedToGallery(true);
+
+      // Clean up temporary guest file from cloud after successful copy
+      if (retrievedFile.isTemporary) {
+        cleanupTemporaryFile(retrievedFile);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Failed to save file to gallery.");
@@ -396,9 +436,19 @@ const App = () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        // Clean up temporary file from cloud after download
+        if (retrievedFile && retrievedFile.isTemporary) {
+          cleanupTemporaryFile(retrievedFile);
+        }
       })
       .catch((err) => {
         window.open(url, "_blank");
+
+        // Clean up temporary file from cloud after download redirect fallback
+        if (retrievedFile && retrievedFile.isTemporary) {
+          cleanupTemporaryFile(retrievedFile);
+        }
       });
   };
 
@@ -539,7 +589,7 @@ const App = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
             >
-              <Gallery user={user} />
+              <Gallery user={user} onViewFile={setLightboxFile} />
             </motion.div>
           )}
 
@@ -660,11 +710,30 @@ const App = () => {
                     </div>
 
                     {/* File Preview */}
-                    <div className="aspect-video w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center">
+                    <div 
+                      className={`aspect-video w-full rounded-2xl bg-black/40 border border-white/5 overflow-hidden flex items-center justify-center relative group ${
+                        (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") ? "cursor-zoom-in" : ""
+                      }`}
+                      onClick={() => {
+                        if (retrievedFile.fileType === "image" || retrievedFile.fileType === "video") {
+                          setLightboxFile(retrievedFile);
+                        }
+                      }}
+                    >
                       {retrievedFile.fileType === "image" ? (
-                        <img src={retrievedFile.url} alt={retrievedFile.name} className="w-full h-full object-contain" />
+                        <>
+                          <img src={retrievedFile.url} alt={retrievedFile.name} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                            <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to View Full</span>
+                          </div>
+                        </>
                       ) : retrievedFile.fileType === "video" ? (
-                        <video src={retrievedFile.url} className="w-full h-full object-contain" controls />
+                        <>
+                          <video src={retrievedFile.url} className="w-full h-full object-contain hover:scale-[1.02] transition-transform duration-300" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                            <span className="text-xs font-bold text-white px-3 py-1.5 bg-white/10 backdrop-blur-md rounded-full border border-white/10">Click to Play Full Screen</span>
+                          </div>
+                        </>
                       ) : (
                         <div className="flex flex-col items-center justify-center space-y-3 p-8">
                           <FileText size={64} className="text-indigo-400 drop-shadow-md" />
@@ -754,6 +823,71 @@ const App = () => {
           </div>
         </div>
       </footer>
+      <AnimatePresence>
+        {lightboxFile && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-md p-4 sm:p-8"
+            onClick={() => setLightboxFile(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="relative max-w-5xl max-h-[85vh] w-full flex flex-col items-center justify-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Close Button */}
+              <button
+                onClick={() => setLightboxFile(null)}
+                className="absolute -top-14 right-0 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors z-[101]"
+              >
+                <X size={24} />
+              </button>
+
+              {/* Lightbox Content */}
+              <div className="w-full h-full flex items-center justify-center rounded-3xl overflow-hidden bg-black/40 border border-white/10 shadow-2xl">
+                {lightboxFile.fileType === "image" ? (
+                  <img
+                    src={lightboxFile.url}
+                    alt={lightboxFile.name}
+                    className="max-w-full max-h-[75vh] object-contain select-none rounded-2xl"
+                  />
+                ) : lightboxFile.fileType === "video" ? (
+                  <video
+                    src={lightboxFile.url}
+                    className="max-w-full max-h-[75vh] object-contain rounded-2xl"
+                    controls
+                    autoPlay
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-12 space-y-4">
+                    <FileText size={80} className="text-indigo-400" />
+                    <p className="text-lg font-bold text-zinc-100">{lightboxFile.name}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Title & Download Button */}
+              <div className="mt-4 w-full flex items-center justify-between text-zinc-300 px-2">
+                <span className="text-sm font-semibold truncate max-w-[70%]" title={lightboxFile.name}>
+                  {lightboxFile.name}
+                </span>
+                <button
+                  onClick={() => downloadRetrievedFile(lightboxFile.url, lightboxFile.name)}
+                  className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold rounded-xl flex items-center gap-2 transition-all active:scale-95 shadow-md shadow-indigo-500/10"
+                >
+                  <Download size={14} />
+                  <span>Download</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
